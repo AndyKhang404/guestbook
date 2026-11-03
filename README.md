@@ -35,14 +35,13 @@ Contributing
 
 Ready to add your name? See [CONTRIBUTING.md](CONTRIBUTING.md).
 
-<!--
 Want to learn with a video instead? Check out the full guide to contributing
 here:
 
 <a href="https://youtu.be/J7ei0LvZv-Q"><img
 alt="How to Make Your First Pull Request (Complete Guide)"
 src="https://i.ytimg.com/vi/J7ei0LvZv-Q/maxresdefault.jpg"
-/></a>-->
+/></a>
 
 Testing
 -------
