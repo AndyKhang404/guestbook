@@ -1,6 +1,6 @@
 #!/usr/bin/env perl
 #
-# Validate a single contributor file.
+# Validate one or more contributor files.
 #
 # I know, it's perl - isn't that crazy?! I would have liked to use bash, but i
 # wasn't able to validate the emoji in a consistent way that handled compound
@@ -31,19 +31,23 @@ my %GRANDFATHERED = (
 );
 
 # get file argument
-if (@ARGV != 1) {
+if (@ARGV < 1) {
 	usage();
 	exit 2;
 }
-my $file = $ARGV[0];
 
 sub usage {
-	print STDERR "usage: validate-file ./contributors/<github-login>.txt\n";
+	print STDERR "usage: validate-file <file.txt> [...]\n";
 }
 
 sub fail {
 	my ($message) = @_;
-	print STDERR "FAIL: $file - $message\n";
+	die "$message\n";
+}
+
+sub fatal {
+	my ($message) = @_;
+	print STDERR "FATAL $message\n";
 	exit 1;
 }
 
@@ -52,7 +56,7 @@ sub load_emojis {
 	my %emojis;
 
 	open my $fh, '<:encoding(UTF-8)', $EMOJI_FILE
-	    or fail("cannot open emoji data: $!");
+	    or fatal("cannot open emoji data: $!");
 
 	local $/ = "\n";
 	while (my $entry = <$fh>) {
@@ -71,83 +75,108 @@ sub load_emojis {
 		$emojis{$value} = 1;
 	}
 
-	close $fh or fail("cannot close emoji data: $!");
+	close $fh or fatal("cannot close emoji data: $!");
 
 	# ensure we read *something*
-	keys %emojis or fail('emoji data contains no accepted sequences');
+	keys %emojis or fatal('emoji data contains no accepted sequences');
 
 	return %emojis;
 }
 
-my %emojis = load_emojis();
+sub validate_file {
+	my ($file, $emojis) = @_;
+	# ensure it is a regular file
+	-f $file or fail("not a regular file: $file");
+	-l $file and fail("symbolic links are not allowed: $file");
 
-# ensure it is a regular file
--f $file or fail("not a regular file: $file");
--l $file and fail("symbolic links are not allowed: $file");
+	# get the username from the file
+	my $name = basename($file);
+	$name =~ /\.txt\z/ or fail('filename must end in .txt');
+	my $login = $name;
+	$login =~ s/\.txt\z//;
 
-# get the username from the file
-my $name = basename($file);
-$name =~ /\.txt\z/ or fail('filename must end in .txt');
-my $login = $name;
-$login =~ s/\.txt\z//;
+	# validate github username
+	$login =~ /\A[a-z0-9][a-z0-9-]{0,38}\z/
+	    or fail('filename must contain a lowercase GitHub login');
+	$login !~ /--/
+	    or fail('GitHub logins cannot contain consecutive hyphens');
+	$login !~ /-\z/
+	    or fail('GitHub logins cannot end with a hyphen');
 
-# validate github username
-$login =~ /\A[a-z0-9][a-z0-9-]{0,38}\z/
-    or fail('filename must contain a lowercase GitHub login');
-$login !~ /--/ or fail('GitHub logins cannot contain consecutive hyphens');
-$login !~ /-\z/ or fail('GitHub logins cannot end with a hyphen');
+	# read the file as raw bytes
+	open my $fh, '<:raw', $file or fail("cannot read $file: $!");
+	local $/;
+	my $bytes = <$fh>;
+	close $fh or fail("cannot close $file: $!");
 
-# read the file as raw bytes
-open my $fh, '<:raw', $file or fail("cannot read $file: $!");
-local $/;
-my $bytes = <$fh>;
-close $fh or fail("cannot close $file: $!");
+	# validate file max length
+	length($bytes) <= 1024 or fail('file must not exceed 1024 bytes');
 
-# validate file max length
-length($bytes) <= 1024 or fail('file must not exceed 1024 bytes');
+	# validate the file contents (not empty, 1 line, no \r)
+	length($bytes) > 0 && $bytes =~ /\n\z/ && $bytes !~ /\n./s
+	    or fail('file must contain exactly one newline-terminated line');
+	$bytes !~ /\r/
+	    or fail('Windows-style CRLF line endings are not allowed');
 
-# validate the file contents (not empty, 1 line, no \r)
-length($bytes) > 0 && $bytes =~ /\n\z/ && $bytes !~ /\n./s
-    or fail('file must contain exactly one newline-terminated line');
-$bytes !~ /\r/ or fail('Windows-style CRLF line endings are not allowed');
+	# we have 1 line - decode it as UTF-8
+	my $line;
+	eval {
+		$line = decode('UTF-8', substr($bytes, 0, -1), FB_CROAK);
+		1;
+	} or fail('file must be valid UTF-8');
 
-# we have 1 line - decode it as UTF-8
-my $line;
-eval {
-	$line = decode('UTF-8', substr($bytes, 0, -1), FB_CROAK);
-	1;
-} or fail('file must be valid UTF-8');
+	# parse the structure of the line with regex
+	my ($have_login, $symbol) =
+	    $line =~ /\A([^ ]+) [wW][aA][sS] [hH][eE][rR][eE] (.+)\z/s;
+	defined $symbol or fail('expected: <username> was here <char>');
 
-# parse the structure of the line with regex
-my ($have_login, $symbol) =
-    $line =~ /\A([^ ]+) [wW][aA][sS] [hH][eE][rR][eE] (.+)\z/s;
-defined $symbol or fail('expected: <username> was here <char>');
+	# ensure the login we found in the file *looks* correct
+	$have_login =~ /\A[A-Za-z0-9-]+\z/
+	    or fail(
+		'username may contain only ASCII letters, numbers, and hyphens'
+	    );
 
-# ensure the login we found in the file *looks* correct
-$have_login =~ /\A[A-Za-z0-9-]+\z/
-    or fail('username may contain only ASCII letters, numbers, and hyphens');
+	# ensure the username in the file matches the basename of the file
+	lc($have_login) eq $login
+	    or fail(
+		'username must match the lowercase filename (case-insensitive)'
+	    );
 
-# ensure the username in the file matches the basename of the file
-lc($have_login) eq $login
-    or fail('username must match the lowercase filename (case-insensitive)');
+	# ensure only 1 visible grapheme is contained in the "symbol"
+	my @graphemes = $symbol =~ /\X/g;
+	@graphemes == 1 && $graphemes[0] eq $symbol
+	    or fail(
+		'the final item must be exactly one visible Unicode character'
+	    );
 
-# ensure only 1 visible grapheme is contained in the "symbol"
-my @graphemes = $symbol =~ /\X/g;
-@graphemes == 1 && $graphemes[0] eq $symbol
-    or fail('the final item must be exactly one visible Unicode character');
+	# ensure the visible grapheme is *not* a control character
+	$symbol =~ /[^\p{Z}\p{C}]/
+	    or fail(
+		'the final character cannot be whitespace '
+		. 'or a control character'
+	    );
 
-# ensure the visible grapheme is *not* a control character
-$symbol =~ /[^\p{Z}\p{C}]/
-    or fail('the final character cannot be whitespace or a control character');
+	# check if the final "symbol" is a single character or single emoji.
+	unless (exists $GRANDFATHERED{$login}) {
+		my $is_character = $symbol =~ /\A[\p{L}\p{N}\p{P}\p{S}]\z/
+		    && $symbol !~ /\p{Default_Ignorable_Code_Point}/;
+		my $is_emoji = exists $emojis->{$symbol};
+		($is_emoji || $is_character)
+		    or fail('final symbol must be a single character or emoji');
+	}
 
-# check if the final "symbol" is a single character or single emoji.
-unless (exists $GRANDFATHERED{$login}) {
-	my $is_character = $symbol =~ /\A[\p{L}\p{N}\p{P}\p{S}]\z/
-	    && $symbol !~ /\p{Default_Ignorable_Code_Point}/;
-	my $is_emoji = exists $emojis{$symbol};
-	($is_emoji || $is_character)
-	    or fail("final symbol must be a single character or emoji");
+	# ok! at this point we are sure the file is valid (probably)
+	print "OK: $file\n";
 }
 
-# ok! at this point we are sure the file is valid (probably)
-print "OK: $file\n";
+my %emojis = load_emojis();
+my $code = 0;
+for my $arg (@ARGV) {
+	local $@;
+	eval { validate_file($arg, \%emojis); 1 } or do {
+		print STDERR "FAIL: $arg - $@";
+		$code = 1;
+	};
+}
+
+exit $code;
