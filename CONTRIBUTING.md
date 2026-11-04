@@ -28,7 +28,8 @@ Add your entry
    OK: ./contributors/your-github-username.txt
    ```
 
-7. Commit and push your change, then open a pull request.
+7. Optionally create a new local branch.
+8. Commit and push your change, then open a pull request.
 
 Updating or removing your entry
 --------------------------------
