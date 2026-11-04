@@ -61,6 +61,9 @@ local $/;
 my $bytes = <$fh>;
 close $fh or fail("cannot close $file: $!");
 
+# validate file max length
+length($bytes) <= 1024 or fail('file must not exceed 1024 bytes');
+
 # validate the file contents (not empty, 1 line, no \r)
 length($bytes) > 0 && $bytes =~ /\n\z/ && $bytes !~ /\n./s
     or fail('file must contain exactly one newline-terminated line');

@@ -46,8 +46,7 @@ Format
 Where `<username>` is a valid GitHub username and `<emoji>` is a single emoji
 (or character, or visible grapheme).
 
-Common Issues
--------------
+### Rules
 
 - You must use your own GitHub username (the same name that authors the pull
   request).
@@ -58,6 +57,7 @@ Common Issues
 - The file must contain exactly one line and end with a newline.
 - The final item must be one visible Unicode grapheme (any character is also
   valid if you're boring and hate emoji).
+- The file must not exceed 1024 bytes.
 
 Notes
 -----
